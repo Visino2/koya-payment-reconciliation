@@ -6,15 +6,39 @@ Run:  python3 reconcile.py
 """
 import json
 
+
+def parse_amount(value):
+    # Some amounts are exported as strings with thousands separators, e.g. "4,804.15".
+    if isinstance(value, str):
+        value = value.replace(",", "").strip()
+    return float(value)
+
+
+# Keep only the latest attempt for each txn_id.
+latest = {}
+
+with open("payments.jsonl", encoding="utf-8") as f:
+    for line in f:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # truncated / unreadable line
+        if not isinstance(event, dict):
+            continue
+        txn_id = event.get("txn_id")
+        if not txn_id:
+            continue  # events without a txn_id are ignored
+        # ts is ISO-8601 UTC with a fixed format, so string comparison orders correctly.
+        prev = latest.get(txn_id)
+        if prev is None or event["ts"] > prev["ts"]:
+            latest[txn_id] = event
+
 total = 0.0
 count = 0
-
-with open("payments.jsonl") as f:
-    for line in f:
-        event = json.loads(line)
-        if event["status"] == "success":
-            total += float(event["amount"])
-            count += 1
+for event in latest.values():
+    if event["status"] == "success":
+        total += parse_amount(event["amount"])
+        count += 1
 
 with open("expected.txt") as f:
     expected = int(f.read().strip())
